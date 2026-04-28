@@ -1,0 +1,157 @@
+#!/bin/bash
+
+set -e
+
+START_PORT=37008
+COUNT=2
+BASE_DIR="$(pwd)"
+
+echo "===================================="
+echo "  MIKROCATA FULL INSTALLER"
+echo "===================================="
+
+# -------------------------------------------------
+# 1. STAMUSCTL
+# -------------------------------------------------
+echo "[1/5] Instalando stamusctl..."
+
+if ! command -v stamusctl >/dev/null; then
+    wget -q https://github.com/StamusNetworks/stamusctl/releases/latest/download/stamusctl-linux-amd64
+    chmod +x stamusctl-linux-amd64
+    sudo mv stamusctl-linux-amd64 /usr/local/bin/stamusctl
+fi
+
+stamusctl compose init || true
+
+echo "[X] Copiando configuración al sistema..."
+
+# crear carpetas necesarias
+mkdir -p ./fluentd
+mkdir -p ./suricata/logs
+mkdir -p ./nginx
+
+cat <<EOF > ./fluentd/Dockerfile
+FROM ghcr.io/calyptia/fluentd:v1.14.6-debian-1.0
+
+USER root
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libgeoip-dev \
+    ruby-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN fluent-gem install fluent-plugin-rewrite-tag-filter --no-document
+RUN fluent-gem install fluent-plugin-multi-format-parser --no-document
+RUN fluent-gem install fluent-plugin-geoip --no-document
+
+USER fluent
+ENV FLUENTD_CONF=fluent.conf
+
+CMD ["fluentd"]
+EOF
+
+cat <<EOF > ./fluentd/fluent.conf
+<source>
+  @type tail
+  path /var/log/suricata/eve.json
+  pos_file /fluentd/log/eve.pos
+  tag suricata
+  <parse>
+    @type json
+  </parse>
+</source>
+
+<match suricata>
+  @type stdout
+</match>
+EOF
+
+
+sudo cp -r ./config/suricata/. ./suricata/
+sudo cp -r ./config/nginx/. ./nginx
+
+
+# -------------------------------------------------
+# 2. MIKROCATA REPO
+# -------------------------------------------------
+echo "[2/5] Descargando Mikrocata..."
+
+if [ ! -d "$BASE_DIR/mikrocata2selks" ]; then
+    git clone https://github.com/angolo40/mikrocata2selks.git "$BASE_DIR/mikrocata2selks"
+fi
+
+# -------------------------------------------------
+# 3. TZSP + SYSTEMD CONFIG
+# -------------------------------------------------
+echo "[3/5] Configurando TZSP..."
+
+sudo mkdir -p /etc/systemd/network
+sudo mkdir -p /etc/systemd/system
+sudo mkdir -p /var/lib/mikrocata
+
+for ((i=0; i<COUNT; i++))
+do
+    cp "$BASE_DIR/mikrocata2selks/tzsp.netdev" /etc/systemd/network/tzsp$i.netdev
+    cp "$BASE_DIR/mikrocata2selks/tzsp.network" /etc/systemd/network/tzsp$i.network
+
+    sed -i "s/tzsp0/tzsp$i/g" /etc/systemd/network/tzsp$i.netdev
+    sed -i "s/tzsp0/tzsp$i/g" /etc/systemd/network/tzsp$i.network
+
+    # mikrocata script
+    cp "$BASE_DIR/mikrocata2selks/mikrocata.py" /usr/local/bin/mikrocataTZSP$i.py
+    chmod +x /usr/local/bin/mikrocataTZSP$i.py
+    sed -i "s/tzsp0/tzsp$i/g" /usr/local/bin/mikrocataTZSP$i.py
+
+    # systemd service
+    cp "$BASE_DIR/mikrocata2selks/mikrocata.service" /etc/systemd/system/mikrocataTZSP$i.service
+    sed -i "s/mikrocata.py/mikrocataTZSP$i.py/g" /etc/systemd/system/mikrocataTZSP$i.service
+
+    # data files
+    touch /var/lib/mikrocata/savelists-tzsp$i.json
+    touch /var/lib/mikrocata/uptime-tzsp$i.bookmark
+    touch /var/lib/mikrocata/ignore-tzsp$i.conf
+
+systemctl enable --now mikrocataTZSP$i.service
+
+done
+
+systemctl enable systemd-networkd
+systemctl restart systemd-networkd
+systemctl daemon-reload
+
+# -------------------------------------------------
+# 4. TZSP REPLAY SERVICE
+# -------------------------------------------------
+echo "[4/5] Configurando TZSP replay..."
+
+for ((i=0; i<COUNT; i++))
+do
+    PORT=$((START_PORT + i))
+
+    cp "$BASE_DIR/mikrocata2selks/TZSPreplay@.service" /etc/systemd/system/TZSPreplay$PORT@.service
+
+    sed -i "s/tzsp2pcap/tzsp2pcap -p $PORT/g" /etc/systemd/system/TZSPreplay$PORT@.service
+
+    systemctl enable --now TZSPreplay$PORT@tzsp$i.service
+done
+
+# -------------------------------------------------
+# 5. DOCKER STACK
+# -------------------------------------------------
+echo "[5/5] Levantando Docker..."
+
+cd "$BASE_DIR"
+
+if [ -f docker-compose.yml ]; then
+    docker compose down || true
+    docker compose build fluentd --no-cache
+    docker compose up -d
+else
+    echo "⚠️ No se encontró docker-compose.yml"
+fi
+
+echo "===================================="
+echo " INSTALACIÓN COMPLETADA"
+echo "===================================="
+carlos@suri:~/nuevo$
