@@ -1,5 +1,4 @@
 #!/bin/bash
-
 set -e
 
 START_PORT=37008
@@ -7,13 +6,24 @@ COUNT=2
 BASE_DIR="$(pwd)"
 
 echo "===================================="
-echo "  MIKROCATA FULL INSTALLER"
+echo "  MIKROCATA FULL INSTALACION"
 echo "===================================="
 
 # -------------------------------------------------
-# 1. STAMUSCTL
+# 1. DEPENDENCIAS SISTEMA
 # -------------------------------------------------
-echo "[1/5] Instalando stamusctl..."
+echo "[1/9] Instalando dependencias..."
+
+sudo apt-get update
+sudo apt-get install -y \
+    git python3 python3-pip systemd wget curl
+
+sudo pip3 install --break-system-packages routeros-api
+
+# -------------------------------------------------
+# 2. STAMUSCTL
+# -------------------------------------------------
+echo "[2/9] Instalando stamusctl..."
 
 if ! command -v stamusctl >/dev/null; then
     wget -q https://github.com/StamusNetworks/stamusctl/releases/latest/download/stamusctl-linux-amd64
@@ -23,134 +33,127 @@ fi
 
 stamusctl compose init || true
 
-echo "[X] Copiando configuración al sistema..."
-
-# crear carpetas necesarias
-mkdir -p ./fluentd
-mkdir -p ./suricata/logs
-mkdir -p ./nginx
-
-cat <<EOF > ./fluentd/Dockerfile
-FROM ghcr.io/calyptia/fluentd:v1.14.6-debian-1.0
-
-USER root
-
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libgeoip-dev \
-    ruby-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN fluent-gem install fluent-plugin-rewrite-tag-filter --no-document
-RUN fluent-gem install fluent-plugin-multi-format-parser --no-document
-RUN fluent-gem install fluent-plugin-geoip --no-document
-
-USER fluent
-ENV FLUENTD_CONF=fluent.conf
-
-CMD ["fluentd"]
-EOF
-
-cat <<EOF > ./fluentd/fluent.conf
-<source>
-  @type tail
-  path /var/log/suricata/eve.json
-  pos_file /fluentd/log/eve.pos
-  tag suricata
-  <parse>
-    @type json
-  </parse>
-</source>
-
-<match suricata>
-  @type stdout
-</match>
-EOF
-
-
-sudo cp -r ./config/suricata/. ./suricata/
-sudo cp -r ./config/nginx/. ./nginx
-
-
 # -------------------------------------------------
-# 2. MIKROCATA REPO
+# 3. REPO
 # -------------------------------------------------
-echo "[2/5] Descargando Mikrocata..."
+echo "[3/9] Descargando Mikrocata..."
 
 if [ ! -d "$BASE_DIR/mikrocata2selks" ]; then
-    git clone https://github.com/angolo40/mikrocata2selks.git "$BASE_DIR/mikrocata2selks"
+    git clone https://github.com/angolo40/mikrocata2selks.git
 fi
 
 # -------------------------------------------------
-# 3. TZSP + SYSTEMD CONFIG
+# 4. VALIDACIÓN CRÍTICA
 # -------------------------------------------------
-echo "[3/5] Configurando TZSP..."
+echo "[4/9] Validando entorno..."
+
+MIKRO_SCRIPT=$(find "$BASE_DIR/mikrocata2selks" -name "*.py" | head -n 1)
+
+if [ -z "$MIKRO_SCRIPT" ]; then
+    echo "❌ ERROR: No se encontró script Python en el repo"
+    exit 1
+fi
+
+python3 -m py_compile "$MIKRO_SCRIPT" || {
+    echo "❌ ERROR: Python con errores de sintaxis"
+    exit 1
+}
+
+echo "✔ Script válido: $MIKRO_SCRIPT"
+
+# -------------------------------------------------
+# 5. PREPARACIÓN TZSP
+# -------------------------------------------------
+echo "[5/9] Preparando TZSP..."
 
 sudo mkdir -p /etc/systemd/network
 sudo mkdir -p /etc/systemd/system
 sudo mkdir -p /var/lib/mikrocata
 
+# -------------------------------------------------
+# 6. CREACIÓN INSTANCIAS
+# -------------------------------------------------
+echo "[6/9] Creando instancias..."
+
 for ((i=0; i<COUNT; i++))
 do
-    cp "$BASE_DIR/mikrocata2selks/tzsp.netdev" /etc/systemd/network/tzsp$i.netdev
-    cp "$BASE_DIR/mikrocata2selks/tzsp.network" /etc/systemd/network/tzsp$i.network
+    TZSP="tzsp$i"
 
-    sed -i "s/tzsp0/tzsp$i/g" /etc/systemd/network/tzsp$i.netdev
-    sed -i "s/tzsp0/tzsp$i/g" /etc/systemd/network/tzsp$i.network
+    # Interfaces systemd
+    cp "$BASE_DIR/mikrocata2selks/tzsp.netdev" /etc/systemd/network/${TZSP}.netdev
+    cp "$BASE_DIR/mikrocata2selks/tzsp.network" /etc/systemd/network/${TZSP}.network
 
-    # mikrocata script
-    cp "$BASE_DIR/mikrocata2selks/mikrocata.py" /usr/local/bin/mikrocataTZSP$i.py
-    chmod +x /usr/local/bin/mikrocataTZSP$i.py
-    sed -i "s/tzsp0/tzsp$i/g" /usr/local/bin/mikrocataTZSP$i.py
+    sed -i "s/tzsp0/${TZSP}/g" /etc/systemd/network/${TZSP}.netdev
+    sed -i "s/tzsp0/${TZSP}/g" /etc/systemd/network/${TZSP}.network
 
-    # systemd service
-    cp "$BASE_DIR/mikrocata2selks/mikrocata.service" /etc/systemd/system/mikrocataTZSP$i.service
-    sed -i "s/mikrocata.py/mikrocataTZSP$i.py/g" /etc/systemd/system/mikrocataTZSP$i.service
+    # Python
+    sudo cp "$MIKRO_SCRIPT" /usr/local/bin/mikrocata${TZSP}.py
+    sudo chmod +x /usr/local/bin/mikrocata${TZSP}.py
 
-    # data files
-    touch /var/lib/mikrocata/savelists-tzsp$i.json
-    touch /var/lib/mikrocata/uptime-tzsp$i.bookmark
-    touch /var/lib/mikrocata/ignore-tzsp$i.conf
+    # Systemd service
+    sudo tee /etc/systemd/system/mikrocata${TZSP}.service > /dev/null <<EOF
+[Unit]
+Description=Mikrocata ${TZSP}
+After=network.target
 
-systemctl enable --now mikrocataTZSP$i.service
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/mikrocata${TZSP}.py
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Data files
+    sudo touch /var/lib/mikrocata/savelists-${TZSP}.json
+    sudo touch /var/lib/mikrocata/uptime-${TZSP}.bookmark
+    sudo touch /var/lib/mikrocata/ignore-${TZSP}.conf
 
 done
 
-systemctl enable systemd-networkd
-systemctl restart systemd-networkd
+# -------------------------------------------------
+# 7. SYSTEMD RECARGA
+# -------------------------------------------------
+echo "[7/9] Recargando systemd..."
+
 systemctl daemon-reload
+systemctl enable systemd-networkd || true
+systemctl restart systemd-networkd || true
 
 # -------------------------------------------------
-# 4. TZSP REPLAY SERVICE
+# 8. ENABLE SERVICIOS
 # -------------------------------------------------
-echo "[4/5] Configurando TZSP replay..."
+echo "[8/9] Habilitando servicios..."
 
 for ((i=0; i<COUNT; i++))
 do
-    PORT=$((START_PORT + i))
-
-    cp "$BASE_DIR/mikrocata2selks/TZSPreplay@.service" /etc/systemd/system/TZSPreplay$PORT@.service
-
-    sed -i "s/tzsp2pcap/tzsp2pcap -p $PORT/g" /etc/systemd/system/TZSPreplay$PORT@.service
-
-    systemctl enable --now TZSPreplay$PORT@tzsp$i.service
+    TZSP="tzsp$i"
+    systemctl enable mikrocata${TZSP}.service
 done
 
 # -------------------------------------------------
-# 5. DOCKER STACK
+# 9. START + VERIFICACIÓN
 # -------------------------------------------------
-echo "[5/5] Levantando Docker..."
+echo "[9/9] Iniciando servicios..."
 
-cd "$BASE_DIR"
+for ((i=0; i<COUNT; i++))
+do
+    TZSP="tzsp$i"
 
-if [ -f docker-compose.yml ]; then
-    docker compose down || true
-    docker compose build fluentd --no-cache
-    docker compose up -d
-else
-    echo "⚠️ No se encontró docker-compose.yml"
-fi
+    systemctl start mikrocata${TZSP}.service
+
+    sleep 1
+
+    systemctl is-active --quiet mikrocata${TZSP}.service || {
+        echo "❌ ERROR: mikrocata${TZSP} no arrancó"
+        systemctl status mikrocata${TZSP}.service
+        exit 1
+    }
+
+    echo "✔ mikrocata${TZSP} OK"
+done
 
 echo "===================================="
-echo " INSTALACIÓN COMPLETADA"
+echo " INSTALACIÓN COMPLETADA CORRECTAMENTE"
 echo "===================================="
