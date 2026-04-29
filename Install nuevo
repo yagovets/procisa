@@ -1,109 +1,66 @@
+
 #!/bin/bash
 
 set -e
 
 COUNT=2
+START_PORT=37008
 BASE_DIR="$(pwd)"
 
-# 🔥 CAMBIA ESTO
-OPENSEARCH_HOST="1.2.3.4"
-OPENSEARCH_PORT="9200"
-
 echo "===================================="
-echo "   NDR AUTO INSTALLER (FULL)"
+echo "   NDR INSTALL (MIKROTIK EXTERNO)"
 echo "===================================="
 
-# ============================
+# =====================================
 # 1. DEPENDENCIAS
-# ============================
+# =====================================
 echo "[1/5] Instalando dependencias..."
 
 sudo apt update
-sudo apt install -y git docker.io docker-compose-plugin
+sudo apt install -y \
+    git wget unzip build-essential \
+    python3-pip python3-requests python3-ujson \
+    python3-librouteros python3-pyinotify \
+    libpcap-dev tcpdump
+
+# Docker
+if ! command -v docker >/dev/null; then
+    echo "→ Instalando Docker..."
+    curl -fsSL https://get.docker.com | sh
+fi
 
 sudo systemctl enable --now docker
 
-# ============================
-# 2. ESTRUCTURA
-# ============================
-echo "[2/5] Creando estructura..."
-
-mkdir -p fluentd
-mkdir -p suricata/logs
-mkdir -p nginx
-
-# ============================
-# 3. FLUENTD CONFIG
-# ============================
-echo "[3/5] Configurando Fluentd..."
-
-cat <<EOF > fluentd/fluent.conf
-<source>
-  @type tail
-  path /var/log/suricata/eve.json
-  pos_file /fluentd/log/eve.pos
-  tag suricata
-  <parse>
-    @type json
-  </parse>
-</source>
-
-<match suricata>
-  @type opensearch
-  host $OPENSEARCH_HOST
-  port $OPENSEARCH_PORT
-  logstash_format true
-  logstash_prefix suricata
-  include_tag_key true
-  tag_key @log_name
-  flush_interval 5s
-</match>
-EOF
-
-# ============================
-# 4. DOCKER COMPOSE
-# ============================
-echo "[4/5] Creando Docker stack..."
-
-cat <<EOF > docker-compose.yml
-version: '3.8'
-
-services:
-
-  suricata:
-    image: jasonish/suricata:8.0
-    container_name: suricata
-    network_mode: host
-    cap_add:
-      - NET_ADMIN
-      - SYS_NICE
-    volumes:
-      - ./suricata:/etc/suricata
-      - ./suricata/logs:/var/log/suricata
-      - /var/lib/suricata/rules:/var/lib/suricata/rules
-    command: -i tzsp0 -i tzsp1
-
-  fluentd:
-    image: fluent/fluentd:v1.16-debian
-    container_name: fluentd
-    volumes:
-      - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf
-      - ./suricata/logs:/var/log/suricata
-    ports:
-      - "24224:24224"
-    depends_on:
-      - suricata
-
-EOF
-
-# ============================
-# 5. MIKROCATA
-# ============================
-echo "[5/5] Configurando Mikrocata..."
+# =====================================
+# 2. DESCARGAR MIKROCATA
+# =====================================
+echo "[2/5] Descargando Mikrocata..."
 
 if [ ! -d "$BASE_DIR/mikrocata2selks" ]; then
     git clone https://github.com/angolo40/mikrocata2selks.git
 fi
+
+# =====================================
+# 3. INSTALAR tzsp2pcap
+# =====================================
+echo "[3/5] Instalando tzsp2pcap..."
+
+cd /opt || exit
+
+if [ ! -d "tzsp2pcap-master" ]; then
+    wget https://github.com/thefloweringash/tzsp2pcap/archive/master.zip
+    unzip master.zip
+    cd tzsp2pcap-master
+    make
+    sudo make install
+fi
+
+cd "$BASE_DIR"
+
+# =====================================
+# 4. CONFIGURAR INTERFACES TZSP
+# =====================================
+echo "[4/5] Configurando interfaces TZSP..."
 
 sudo mkdir -p /etc/systemd/network
 sudo mkdir -p /etc/systemd/system
@@ -111,42 +68,62 @@ sudo mkdir -p /var/lib/mikrocata
 
 for ((i=0; i<COUNT; i++))
 do
-    echo "→ tzsp$i"
+    echo "→ Configurando tzsp$i"
 
+    # Interfaces
     sudo cp mikrocata2selks/tzsp.netdev /etc/systemd/network/tzsp$i.netdev
     sudo cp mikrocata2selks/tzsp.network /etc/systemd/network/tzsp$i.network
 
     sudo sed -i "s/tzsp0/tzsp$i/g" /etc/systemd/network/tzsp$i.*
+    sudo sed -i "s/254/25$i/g" /etc/systemd/network/tzsp$i.network
 
+    # Mikrocata script
     sudo cp mikrocata2selks/mikrocata.py /usr/local/bin/mikrocataTZSP$i.py
     sudo chmod +x /usr/local/bin/mikrocataTZSP$i.py
     sudo sed -i "s/tzsp0/tzsp$i/g" /usr/local/bin/mikrocataTZSP$i.py
 
+    # Service Mikrocata
     sudo cp mikrocata2selks/mikrocata.service /etc/systemd/system/mikrocataTZSP$i.service
     sudo sed -i "s/mikrocata.py/mikrocataTZSP$i.py/g" /etc/systemd/system/mikrocataTZSP$i.service
 
+    # Archivos necesarios
     sudo touch /var/lib/mikrocata/savelists-tzsp$i.json
     sudo touch /var/lib/mikrocata/uptime-tzsp$i.bookmark
     sudo touch /var/lib/mikrocata/ignore-tzsp$i.conf
 done
 
 sudo systemctl daemon-reload
-
-for ((i=0; i<COUNT; i++))
-do
-    sudo systemctl enable --now mikrocataTZSP$i.service
-done
-
 sudo systemctl enable systemd-networkd
 sudo systemctl restart systemd-networkd
 
-# ============================
-# RUN
-# ============================
-echo "🚀 Levantando sistema..."
+# =====================================
+# 5. TZSP REPLAY (PUERTOS)
+# =====================================
+echo "[5/5] Configurando puertos TZSP..."
 
-docker compose up -d
+for ((i=0; i<COUNT; i++))
+do
+    PORT=$((START_PORT + i))
+
+    echo "→ tzsp$i escuchando en puerto $PORT"
+
+    sudo cp mikrocata2selks/TZSPreplay@.service /etc/systemd/system/TZSPreplay$PORT@.service
+    sudo sed -i "s/tzsp2pcap/tzsp2pcap -p $PORT/g" /etc/systemd/system/TZSPreplay$PORT@.service
+
+    sudo systemctl enable --now TZSPreplay$PORT@tzsp$i.service
+    sudo systemctl enable --now mikrocataTZSP$i.service
+done
+
+# =====================================
+# 6. DOCKER (TU STACK)
+# =====================================
+echo "[EXTRA] Levantando Docker Compose..."
+
+cd "$BASE_DIR"
+
+docker compose down || true
+docker compose up -d --build
 
 echo "===================================="
-echo "   TODO FUNCIONANDO 🔥"
+echo "   SISTEMA LISTO 🚀"
 echo "===================================="
