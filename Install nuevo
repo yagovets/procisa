@@ -5,14 +5,18 @@ set -e
 COUNT=2
 BASE_DIR="$(pwd)"
 
+# 🔥 CAMBIA ESTO
+OPENSEARCH_HOST="1.2.3.4"
+OPENSEARCH_PORT="9200"
+
 echo "===================================="
-echo "   NDR INSTALLER (FINAL LIMPIO)"
+echo "   NDR AUTO INSTALLER (FULL)"
 echo "===================================="
 
 # ============================
 # 1. DEPENDENCIAS
 # ============================
-echo "[1/4] Instalando dependencias..."
+echo "[1/5] Instalando dependencias..."
 
 sudo apt update
 sudo apt install -y git docker.io docker-compose-plugin
@@ -22,13 +26,17 @@ sudo systemctl enable --now docker
 # ============================
 # 2. ESTRUCTURA
 # ============================
-echo "[2/4] Creando estructura..."
+echo "[2/5] Creando estructura..."
 
 mkdir -p fluentd
 mkdir -p suricata/logs
 mkdir -p nginx
 
-# fluentd.conf
+# ============================
+# 3. FLUENTD CONFIG
+# ============================
+echo "[3/5] Configurando Fluentd..."
+
 cat <<EOF > fluentd/fluent.conf
 <source>
   @type tail
@@ -41,14 +49,57 @@ cat <<EOF > fluentd/fluent.conf
 </source>
 
 <match suricata>
-  @type stdout
+  @type opensearch
+  host $OPENSEARCH_HOST
+  port $OPENSEARCH_PORT
+  logstash_format true
+  logstash_prefix suricata
+  include_tag_key true
+  tag_key @log_name
+  flush_interval 5s
 </match>
 EOF
 
 # ============================
-# 3. MIKROCATA
+# 4. DOCKER COMPOSE
 # ============================
-echo "[3/4] Configurando Mikrocata..."
+echo "[4/5] Creando Docker stack..."
+
+cat <<EOF > docker-compose.yml
+version: '3.8'
+
+services:
+
+  suricata:
+    image: jasonish/suricata:8.0
+    container_name: suricata
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+    volumes:
+      - ./suricata:/etc/suricata
+      - ./suricata/logs:/var/log/suricata
+      - /var/lib/suricata/rules:/var/lib/suricata/rules
+    command: -i tzsp0 -i tzsp1
+
+  fluentd:
+    image: fluent/fluentd:v1.16-debian
+    container_name: fluentd
+    volumes:
+      - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf
+      - ./suricata/logs:/var/log/suricata
+    ports:
+      - "24224:24224"
+    depends_on:
+      - suricata
+
+EOF
+
+# ============================
+# 5. MIKROCATA
+# ============================
+echo "[5/5] Configurando Mikrocata..."
 
 if [ ! -d "$BASE_DIR/mikrocata2selks" ]; then
     git clone https://github.com/angolo40/mikrocata2selks.git
@@ -90,18 +141,12 @@ sudo systemctl enable systemd-networkd
 sudo systemctl restart systemd-networkd
 
 # ============================
-# 4. DOCKER
+# RUN
 # ============================
-echo "[4/4] Levantando Docker..."
+echo "🚀 Levantando sistema..."
 
-if [ -f docker-compose.yml ]; then
-    docker compose down || true
-    docker compose up -d
-else
-    echo "❌ Falta docker-compose.yml"
-    exit 1
-fi
+docker compose up -d
 
 echo "===================================="
-echo "   SISTEMA LISTO 🚀"
+echo "   TODO FUNCIONANDO 🔥"
 echo "===================================="
