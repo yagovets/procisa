@@ -48,6 +48,7 @@ RUN apt-get update && apt-get install -y \
 RUN fluent-gem install fluent-plugin-rewrite-tag-filter --no-document
 RUN fluent-gem install fluent-plugin-multi-format-parser --no-document
 RUN fluent-gem install fluent-plugin-geoip --no-document
+RUN fluent-gem install fluent-plugin-opensearch --no-document
 
 USER fluent
 ENV FLUENTD_CONF=fluent.conf
@@ -67,7 +68,17 @@ cat <<EOF > ./fluentd/fluent.conf
 </source>
 
 <match suricata>
-  @type stdout
+  @type opensearch
+
+  host TU_IP_OPENSEARCH
+  port 9200
+
+  scheme http
+  logstash_format true
+  logstash_prefix suricata
+  include_tag_key true
+
+  flush_interval 5s
 </match>
 EOF
 
