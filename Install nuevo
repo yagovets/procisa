@@ -15,23 +15,44 @@ echo "===================================="
 echo "[1/4] Instalando dependencias..."
 
 sudo apt update
-sudo apt install -y git docker.io docker-compose
+sudo apt install -y git docker.io docker-compose-plugin
 
 sudo systemctl enable --now docker
 
 # ============================
-# 2. MIKROCATA
+# 2. ESTRUCTURA
 # ============================
-echo "[2/4] Descargando Mikrocata..."
+echo "[2/4] Creando estructura..."
+
+mkdir -p fluentd
+mkdir -p suricata/logs
+mkdir -p nginx
+
+# fluentd.conf
+cat <<EOF > fluentd/fluent.conf
+<source>
+  @type tail
+  path /var/log/suricata/eve.json
+  pos_file /fluentd/log/eve.pos
+  tag suricata
+  <parse>
+    @type json
+  </parse>
+</source>
+
+<match suricata>
+  @type stdout
+</match>
+EOF
+
+# ============================
+# 3. MIKROCATA
+# ============================
+echo "[3/4] Configurando Mikrocata..."
 
 if [ ! -d "$BASE_DIR/mikrocata2selks" ]; then
     git clone https://github.com/angolo40/mikrocata2selks.git
 fi
-
-# ============================
-# 3. TZSP + SERVICIOS
-# ============================
-echo "[3/4] Configurando TZSP..."
 
 sudo mkdir -p /etc/systemd/network
 sudo mkdir -p /etc/systemd/system
@@ -46,16 +67,13 @@ do
 
     sudo sed -i "s/tzsp0/tzsp$i/g" /etc/systemd/network/tzsp$i.*
 
-    # script mikrocata
     sudo cp mikrocata2selks/mikrocata.py /usr/local/bin/mikrocataTZSP$i.py
     sudo chmod +x /usr/local/bin/mikrocataTZSP$i.py
     sudo sed -i "s/tzsp0/tzsp$i/g" /usr/local/bin/mikrocataTZSP$i.py
 
-    # servicio
     sudo cp mikrocata2selks/mikrocata.service /etc/systemd/system/mikrocataTZSP$i.service
     sudo sed -i "s/mikrocata.py/mikrocataTZSP$i.py/g" /etc/systemd/system/mikrocataTZSP$i.service
 
-    # archivos necesarios
     sudo touch /var/lib/mikrocata/savelists-tzsp$i.json
     sudo touch /var/lib/mikrocata/uptime-tzsp$i.bookmark
     sudo touch /var/lib/mikrocata/ignore-tzsp$i.conf
@@ -72,15 +90,13 @@ sudo systemctl enable systemd-networkd
 sudo systemctl restart systemd-networkd
 
 # ============================
-# 4. DOCKER STACK
+# 4. DOCKER
 # ============================
 echo "[4/4] Levantando Docker..."
 
-cd "$BASE_DIR"
-
 if [ -f docker-compose.yml ]; then
-    docker-compose down || true
-    docker-compose up -d --build
+    docker compose down || true
+    docker compose up -d
 else
     echo "❌ Falta docker-compose.yml"
     exit 1
