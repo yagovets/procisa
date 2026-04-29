@@ -1,0 +1,8 @@
+[Match]
+Name=tzsp*
+
+[Link]
+MTUBytes=2000
+
+[Network]
+DHCP=no
