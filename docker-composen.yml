@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+
+  suricata:
+    image: jasonish/suricata:8.0
+    container_name: suricata
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+    volumes:
+      - ./suricata:/etc/suricata
+      - ./suricata/logs:/var/log/suricata
+      - /var/lib/suricata/rules:/var/lib/suricata/rules
+    command: -i tzsp0 -i tzsp1
+
+  fluentd:
+    image: fluent/fluentd:v1.16-debian
+    container_name: fluentd
+    volumes:
+      - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf
+      - ./suricata/logs:/var/log/suricata
+    ports:
+      - "24224:24224"
+    depends_on:
+      - suricata
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx:/usr/share/nginx/html
