@@ -19,7 +19,7 @@ services:
 # --- Recoletor de Logs ---
 
   fluentd:
-    build: ./fluentd
+    image: fluentd-nrd
     container_name: fluentd
     volumes:
       - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf
