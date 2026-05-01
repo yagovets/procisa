@@ -34,28 +34,6 @@ mkdir -p ./fluentd
 mkdir -p ./suricata/logs
 mkdir -p ./nginx
 
-cat <<EOF > ./fluentd/Dockerfile
-FROM ghcr.io/calyptia/fluentd:v1.14.6-debian-1.0
-
-USER root
-
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libgeoip-dev \
-    ruby-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN fluent-gem install fluent-plugin-rewrite-tag-filter --no-document
-RUN fluent-gem install fluent-plugin-multi-format-parser --no-document
-RUN fluent-gem install fluent-plugin-geoip --no-document
-RUN fluent-gem install fluent-plugin-opensearch --no-document
-
-USER fluent
-ENV FLUENTD_CONF=fluent.conf
-
-CMD ["fluentd"]
-EOF
-
 cat <<EOF > ./fluentd/fluent.conf
 <source>
   @type tail
@@ -162,8 +140,15 @@ done
 echo "[EXTRA] Docker..."
 
 docker compose down || true
-docker compose up -d --build
+docker compose up -d 
+echo "Esperando a que Fluentd arranque..."
+sleep 10
 
+echo "Instalando plugin OpenSearch en Fluentd..."
+docker exec fluentd fluent-gem install fluent-plugin-opensearch --no-document || true
+
+echo "Reiniciando Fluentd..."
+docker restart fluentd
 echo "===================================="
 echo "   SISTEMA LISTO 🚀"
 echo "===================================="
