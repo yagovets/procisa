@@ -19,7 +19,7 @@ services:
 # --- Recoletor de Logs ---
 
   fluentd:
-    image: fluentd-nrd
+    image: fluentd:v1.19.2-debian-1.0
     container_name: fluentd
     volumes:
       - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf
@@ -30,7 +30,7 @@ services:
 # --- WEB ---
 
   nginx:
-    image: nginx:latest
+    image: nginx:1.25
     container_name: nginx
     ports:
       - "8080:80"
