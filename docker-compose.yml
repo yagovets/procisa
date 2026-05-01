@@ -27,6 +27,13 @@ services:
     ports:
       - "24224:24224"
 
+     restart: unless-stopped
+  entrypoint: >
+    /bin/sh -c "
+    gem install fluent-plugin-opensearch --no-document &&
+    exec fluentd
+    "
+
 # --- WEB ---
 
   nginx:
