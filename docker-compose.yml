@@ -1,7 +1,5 @@
-
 services:
 
-# --- Deteccion  y Prevencion de Red  ---
   suricata:
     image: jasonish/suricata:8.0
     container_name: suricata
@@ -9,32 +7,23 @@ services:
     cap_add:
       - NET_ADMIN
       - SYS_NICE
-
     volumes:
       - ./suricata:/etc/suricata
       - ./suricata/logs:/var/log/suricata
       - /var/lib/suricata/rules:/var/lib/suricata/rules
-    command: -i tzsp0 -i tzsp1
-
-# --- Recoletor de Logs ---
+    command: -i enp0s3
 
   fluentd:
-    image: fluentd:v1.19.2-debian-1.0
+    build: ./fluentd
+    # image: fluent/fluentd:v1.16-debian-1
     container_name: fluentd
     volumes:
       - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf
       - ./suricata/logs:/var/log/suricata
     ports:
       - "24224:24224"
+    restart: unless-stopped
 
-     restart: unless-stopped
-  entrypoint: >
-    /bin/sh -c "
-    gem install fluent-plugin-opensearch --no-document &&
-    exec fluentd
-    "
-
-# --- WEB ---
 
   nginx:
     image: nginx:1.25
@@ -42,4 +31,23 @@ services:
     ports:
       - "8080:80"
     volumes:
-      - ./nginx:/usr/share/nginx/html
+      - ./nginx/conf.d:/etc/nginx/conf.d
+
+  opensearch:
+    image: opensearchproject/opensearch:2.12.0
+    environment:
+      - discovery.type=single-node
+      - plugins.security.disabled=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Anatolievich_Siderenko
+    ports:
+     - "9200:9200"
+
+  dashboards:
+    image: opensearchproject/opensearch-dashboards:2.12.0
+    container_name: dashboards
+    ports:
+      - "5601:5601"
+    environment:
+      - OPENSEARCH_HOSTS=http://opensearch:9200
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
