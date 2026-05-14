@@ -21,7 +21,8 @@ sudo apt install -y \
     wget unzip build-essential \
     python3-pip python3-requests python3-ujson \
     python3-librouteros python3-pyinotify \
-    libpcap-dev tcpdump docker.io
+    libpcap-dev tcpdump \
+    docker.io docker-compose-plugin
 
 sudo systemctl enable --now docker
 
