@@ -11,7 +11,7 @@ services:
       - ./suricata:/etc/suricata
       - ./suricata/logs:/var/log/suricata
       - /var/lib/suricata/rules:/var/lib/suricata/rules
-    command: -i enp0s3
+    command: -i ens192
 
   fluentd:
     build: ./fluentd
