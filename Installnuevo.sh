@@ -22,7 +22,7 @@ sudo apt install -y \
     python3-pip python3-requests python3-ujson \
     python3-librouteros python3-pyinotify \
     libpcap-dev tcpdump \
-    docker.io docker-compose-plugin
+    docker.io docker-compose
 
 sudo systemctl enable --now docker
 
@@ -154,7 +154,7 @@ echo "[EXTRA] Docker..."
 
 docker compose down || true
 docker compose up -d 
-echo "Esperando a que Fluentd arranque..."
+echo "Esperando a que todo arranque..."
 sleep 10
 
 echo "===================================="
