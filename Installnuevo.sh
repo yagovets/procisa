@@ -61,6 +61,18 @@ cat <<EOF > ./fluentd/fluent.conf
 </match>
 EOF
 
+echo "Creando Dockerfile Fluentd..."
+
+cat <<EOF > ./fluentd/Dockerfile
+FROM fluent/fluentd:v1.16-debian-1
+
+USER root
+
+RUN gem install fluent-plugin-opensearch
+
+USER fluent
+EOF
+
 # =====================================
 # 3. tzsp2pcap
 # =====================================
