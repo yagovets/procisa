@@ -25,29 +25,29 @@ services:
     restart: unless-stopped
 
 
-  nginx:
-    image: nginx:1.25
-    container_name: nginx
-    ports:
-      - "8080:80"
-    volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d
+   # nginx:
+  #   image: nginx:1.25
+  #   container_name: nginx
+  #   ports:
+  #     - "8080:80"
+  #   volumes:
+  #     - ./nginx/conf.d:/etc/nginx/conf.d
 
-  opensearch:
-    image: opensearchproject/opensearch:2.12.0
-    environment:
-      - discovery.type=single-node
-      - plugins.security.disabled=true
-      - DISABLE_INSTALL_DEMO_CONFIG=true
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Anatolievich_Siderenko
-    ports:
-     - "9200:9200"
+  # opensearch:
+  #   image: opensearchproject/opensearch:2.12.0
+  #   environment:
+  #     - discovery.type=single-node
+  #     - plugins.security.disabled=true
+  #     - DISABLE_INSTALL_DEMO_CONFIG=true
+  #     - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Anatolievich_Siderenko
+  #   ports:
+  #    - "9200:9200"
 
-  dashboards:
-    image: opensearchproject/opensearch-dashboards:2.12.0
-    container_name: dashboards
-    ports:
-      - "5601:5601"
-    environment:
-      - OPENSEARCH_HOSTS=http://opensearch:9200
-      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+  # dashboards:
+  #   image: opensearchproject/opensearch-dashboards:2.12.0
+  #   container_name: dashboards
+  #   ports:
+  #     - "5601:5601"
+  #   environment:
+  #     - OPENSEARCH_HOSTS=http://opensearch:9200
+  #     - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
